@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 type apiHandler struct {
@@ -20,10 +21,35 @@ func NewHandler(q *pgstore.Queries) http.Handler {
 	a := &apiHandler{
 		q: q,
 	}
-
 	r := chi.NewRouter()
+
+	r.Use(
+		middleware.RequestID, // todos os requests tem um Id
+		middleware.Recoverer, // Quando o codigo gerar um panico nao vai para a execucao do codigo
+		middleware.Logger,    // vai gerar logs
+	)
+
+	r.Route("/api", func(r chi.Router) {
+		r.Route("/rooms", func(r chi.Router) {
+			r.Post("/", a.handleCreateRoom)
+			r.Get("/", a.handleGetRooms)
+
+			r.Route("/{room_id}/messages", func(r chi.Router) {
+				r.Post("/", a.handleCreateRoomMessage)
+				r.Get("/", a.handleGetRoomMessages)
+			})
+		})
+	})
 
 	a.r = r
 
 	return a
 }
+
+func (h apiHandler) handleCreateRoom(w http.ResponseWriter, r *http.Request) {}
+
+func (h apiHandler) handleGetRooms(w http.ResponseWriter, r *http.Request) {}
+
+func (h apiHandler) handleGetRoomMessages(w http.ResponseWriter, r *http.Request) {}
+
+func (h apiHandler) handleCreateRoomMessage(w http.ResponseWriter, r *http.Request) {}
