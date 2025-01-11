@@ -80,10 +80,19 @@ func NewHandler(q *pgstore.Queries) http.Handler {
 	return a
 }
 
+const (
+	MessageKindMessageCreated = "message_created"
+)
+
 type Message struct {
-	Kinda  string `json:"kind"`
+	Kind   string `json:"kind"`
 	Value  any    `json:"value"`
 	RoomId string `json:"-"`
+}
+
+type MessageRoomCreated struct {
+	Id      string `json:"id"`
+	Message string `json:"message"`
 }
 
 // WS
@@ -179,8 +188,10 @@ func (h apiHandler) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(data)
 }
-func (h apiHandler) handleGetRooms(w http.ResponseWriter, r *http.Request)        {}
+func (h apiHandler) handleGetRooms(w http.ResponseWriter, r *http.Request) {}
+
 func (h apiHandler) handleGetRoomMessages(w http.ResponseWriter, r *http.Request) {}
+
 func (h apiHandler) handleCreateRoomMessage(w http.ResponseWriter, r *http.Request) {
 	rawRoomId := chi.URLParam(r, "room_id")
 	roomId, err := uuid.Parse(rawRoomId)
@@ -200,6 +211,41 @@ func (h apiHandler) handleCreateRoomMessage(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "something went wrong", http.StatusInternalServerError)
 		return
 	}
+
+	type _body struct {
+		Message string `json:"message"`
+	}
+
+	var body _body
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	messageId, err := h.q.InserMessage(r.Context(), pgstore.InserMessageParams{RoomID: roomId, Message: body.Message})
+	if err != nil {
+		slog.Error("failed to insert message", "error", err)
+		http.Error(w, "something went wrong", http.StatusInternalServerError)
+		return
+	}
+
+	type response struct {
+		Id string `json:"id"`
+	}
+
+	data, _ := json.Marshal(response{Id: messageId.String()})
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
+
+	go h.notifyClients(Message{
+		Kind:   MessageKindMessageCreated,
+		RoomId: rawRoomId,
+		Value: MessageRoomCreated{
+			Id:      messageId.String(),
+			Message: body.Message,
+		},
+	})
 
 }
 func (h apiHandler) handleGetRoomMessage(w http.ResponseWriter, r *http.Request)         {}
