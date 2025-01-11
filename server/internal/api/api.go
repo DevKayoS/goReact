@@ -80,7 +80,30 @@ func NewHandler(q *pgstore.Queries) http.Handler {
 	return a
 }
 
+type Message struct {
+	Kinda  string `json:"kind"`
+	Value  any    `json:"value"`
+	RoomId string `json:"-"`
+}
+
 // WS
+func (h apiHandler) notifyClients(msg Message) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	subscribers, ok := h.subscriber[msg.RoomId]
+	if !ok || len(subscribers) == 0 {
+		return
+	}
+
+	for conn, cancel := range subscribers {
+		if err := conn.WriteJSON(msg); err != nil {
+			slog.Error("failed to sendo message to clients", "error", err)
+			cancel()
+		}
+	}
+}
+
 func (h apiHandler) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	rawRoomId := chi.URLParam(r, "room_id")
 	roomId, err := uuid.Parse(rawRoomId)
@@ -156,9 +179,29 @@ func (h apiHandler) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(data)
 }
-func (h apiHandler) handleGetRooms(w http.ResponseWriter, r *http.Request)               {}
-func (h apiHandler) handleGetRoomMessages(w http.ResponseWriter, r *http.Request)        {}
-func (h apiHandler) handleCreateRoomMessage(w http.ResponseWriter, r *http.Request)      {}
+func (h apiHandler) handleGetRooms(w http.ResponseWriter, r *http.Request)        {}
+func (h apiHandler) handleGetRoomMessages(w http.ResponseWriter, r *http.Request) {}
+func (h apiHandler) handleCreateRoomMessage(w http.ResponseWriter, r *http.Request) {
+	rawRoomId := chi.URLParam(r, "room_id")
+	roomId, err := uuid.Parse(rawRoomId)
+
+	if err != nil {
+		http.Error(w, "invalid room id", http.StatusBadRequest)
+		return
+	}
+
+	_, err = h.q.GetRoom(r.Context(), roomId)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "room not found", http.StatusBadRequest)
+			return
+		}
+
+		http.Error(w, "something went wrong", http.StatusInternalServerError)
+		return
+	}
+
+}
 func (h apiHandler) handleGetRoomMessage(w http.ResponseWriter, r *http.Request)         {}
 func (h apiHandler) handleReactToMessage(w http.ResponseWriter, r *http.Request)         {}
 func (h apiHandler) handleDeleteReactToMessage(w http.ResponseWriter, r *http.Request)   {}
