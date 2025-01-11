@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"goReact/internal/store/pgstore"
 	"log/slog"
@@ -109,19 +110,52 @@ func (h apiHandler) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 
 	defer c.Close()
 
-	_, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithCancel(r.Context())
 
 	h.mu.Lock()
-	if _, ok := h.subscriber[rawRoomId]; ok {
-		h.subscriber[rawRoomId][c] = cancel
-	} else {
+	// se nao tiver conexao ele cria o map e se ja tiver ele cancela
+	if _, ok := h.subscriber[rawRoomId]; !ok {
 		h.subscriber[rawRoomId] = make(map[*websocket.Conn]context.CancelFunc)
-		h.subscriber[rawRoomId][c] = cancel
 	}
+	slog.Info("new client connected", "room_id", rawRoomId, "client_ip", r.RemoteAddr)
+	h.subscriber[rawRoomId][c] = cancel
+	h.mu.Unlock()
+
+	<-ctx.Done()
+
+	h.mu.Lock()
+	delete(h.subscriber[rawRoomId], c)
+	h.mu.Unlock()
 }
 
 // API
-func (h apiHandler) handleCreateRoom(w http.ResponseWriter, r *http.Request)             {}
+func (h apiHandler) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
+	type _body struct {
+		Theme string `json:"theme"`
+	}
+
+	var body _body
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	roomId, err := h.q.InsertRooms(r.Context(), body.Theme)
+	if err != nil {
+		slog.Error("failed to insert room", "error", err)
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		return
+	}
+
+	type response struct {
+		Id string `json:"id"`
+	}
+
+	data, _ := json.Marshal(response{Id: roomId.String()})
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
+}
 func (h apiHandler) handleGetRooms(w http.ResponseWriter, r *http.Request)               {}
 func (h apiHandler) handleGetRoomMessages(w http.ResponseWriter, r *http.Request)        {}
 func (h apiHandler) handleCreateRoomMessage(w http.ResponseWriter, r *http.Request)      {}
