@@ -188,7 +188,23 @@ func (h apiHandler) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(data)
 }
-func (h apiHandler) handleGetRooms(w http.ResponseWriter, r *http.Request) {}
+func (h apiHandler) handleGetRooms(w http.ResponseWriter, r *http.Request) {
+	rooms, err := h.q.GetRooms(r.Context())
+
+	if err != nil {
+		slog.Error("failed to get rooms", "error", err)
+		http.Error(w, "something went wrong", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := json.NewEncoder(w).Encode(rooms); err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		return
+	}
+
+}
 
 func (h apiHandler) handleGetRoomMessages(w http.ResponseWriter, r *http.Request) {}
 
